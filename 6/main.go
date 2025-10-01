@@ -7,7 +7,7 @@ import (
 func main() {
 	var s = []string{"1", "2", "3"}
 	modifySlice(s)
-	fmt.Println(s)
+	fmt.Println(s) // выведет [3 2 3]
 }
 
 func modifySlice(i []string) {
