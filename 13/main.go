@@ -56,7 +56,6 @@ func cutStream(delim string, fields intSet, separated bool) {
 		parts := strings.Split(line, delim)
 		var selected []string
 
-		// сортировка индексов для сохранения порядка
 		indexes := make([]int, 0, len(fields))
 		for idx := range fields {
 			indexes = append(indexes, idx)
