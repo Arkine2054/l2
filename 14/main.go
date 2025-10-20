@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// or принимает произвольное количество каналов done и возвращает один общий.
-// Как только закрывается хотя бы один канал из списка — общий канал тоже закрывается.
 func or(channels ...<-chan interface{}) <-chan interface{} {
 	switch len(channels) {
 	case 0:
