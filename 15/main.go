@@ -13,23 +13,16 @@ import (
 	"syscall"
 )
 
-// Простой unix-shell
-// Поддерживает встроенные: cd, pwd, echo, kill, ps
-// Поддерживает: внешние команды, пайплайны (|), редиректы (> <), подстановку $VAR,
-// условные операторы && и ||, Ctrl+C - прерывает текущую команду, Ctrl+D - выход
-
-// Структуры для команд
-
 type Cmd struct {
 	Args   []string
-	In     string // filename for stdin, empty = default
-	Out    string // filename for stdout, empty = default
-	Append bool   // >> not required but simple flag
+	In     string
+	Out    string
+	Append bool
 }
 
 type Job struct {
-	Cmds []*Cmd // pipeline commands
-	Cond string // "" | "&&" | "||" - relation to previous job
+	Cmds []*Cmd
+	Cond string
 }
 
 var currentCmdProcs []*os.Process
@@ -37,12 +30,10 @@ var currentCmdProcs []*os.Process
 func main() {
 	reader := bufio.NewReader(os.Stdin)
 
-	// Handle Ctrl+C: forward to running process group
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, os.Interrupt)
 	go func() {
 		for range sigc {
-			// send SIGINT to all running cmds
 			for _, p := range currentCmdProcs {
 				if p == nil {
 					continue
@@ -77,7 +68,6 @@ func main() {
 
 		lastStatus := 0
 		for i, job := range jobs {
-			// Evaluate conditional based on previous exit
 			if i > 0 {
 				prevCond := job.Cond
 				if prevCond == "&&" && lastStatus != 0 {
@@ -94,16 +84,13 @@ func main() {
 	}
 }
 
-// parseLine разбивает строку на Job-ы, учитывая &&, ||
 func parseLine(line string) ([]*Job, error) {
-	// Сначала разделим по && и || сохраняя оператор
 	var jobs []*Job
 	s := strings.TrimSpace(line)
 	if s == "" {
 		return jobs, nil
 	}
 
-	// простой state machine: ищем && или || top-level (не внутри кавычек)
 	parts := splitByLogical(s)
 	for _, p := range parts {
 		trimmed := strings.TrimSpace(p.text)
@@ -119,10 +106,9 @@ func parseLine(line string) ([]*Job, error) {
 	return jobs, nil
 }
 
-// result for logical split
 type logicalPart struct {
 	text string
-	cond string // operator that precedes this part relative to previous: "" for first, else "&&"/"||"
+	cond string
 }
 
 func splitByLogical(s string) []logicalPart {
@@ -139,29 +125,25 @@ func splitByLogical(s string) []logicalPart {
 		if c == '"' && !inS {
 			inD = !inD
 		}
-		// look ahead for && or || if not in quotes
 		if !inS && !inD && i+1 < len(s) {
 			two := s[i : i+2]
 			if two == "&&" || two == "||" {
-				// push current
 				res = append(res, logicalPart{text: cur, cond: cond})
 				cur = ""
 				cond = two
-				i++ // skip next
+				i++
 				continue
 			}
 		}
 		cur += string(c)
 	}
 	res = append(res, logicalPart{text: cur, cond: cond})
-	// first item's cond must be empty
 	if len(res) > 0 {
 		res[0].cond = ""
 	}
 	return res
 }
 
-// parsePipeline: разбивает по | и парсит каждый командный элемент
 func parsePipeline(s string) ([]*Cmd, error) {
 	parts := splitTopLevel(s, '|')
 	var cmds []*Cmd
@@ -179,7 +161,6 @@ func parsePipeline(s string) ([]*Cmd, error) {
 	return cmds, nil
 }
 
-// splitTopLevel разбивает строку по разделителю, игнорируя символы внутри кавычек
 func splitTopLevel(s string, sep rune) []string {
 	var res []string
 	cur := strings.Builder{}
@@ -203,7 +184,6 @@ func splitTopLevel(s string, sep rune) []string {
 	return res
 }
 
-// parseCmd: обработка редиректов > и < и аргументов
 func parseCmd(s string) (*Cmd, error) {
 	tokens := tokenize(s)
 	if len(tokens) == 0 {
@@ -228,7 +208,6 @@ func parseCmd(s string) (*Cmd, error) {
 			}
 			cmd.In = tokens[i]
 		} else {
-			// normal arg
 			arg := expandEnv(t)
 			cmd.Args = append(cmd.Args, arg)
 		}
@@ -237,7 +216,6 @@ func parseCmd(s string) (*Cmd, error) {
 	return cmd, nil
 }
 
-// tokenize: простая токенизация с поддержкой кавычек
 func tokenize(s string) []string {
 	var res []string
 	cur := strings.Builder{}
@@ -264,7 +242,6 @@ func tokenize(s string) []string {
 			i++
 			continue
 		}
-		// handle >, >>, < as separate tokens
 		if !inS && !inD && (c == '>' || c == '<') {
 			if cur.Len() > 0 {
 				res = append(res, cur.String())
@@ -288,9 +265,7 @@ func tokenize(s string) []string {
 	return res
 }
 
-// Подстановка переменных $VAR и ${VAR}
 func expandEnv(s string) string {
-	// простая реализация: находим $ и берём имя до не-буквы-цифры-_ или { }
 	out := strings.Builder{}
 	i := 0
 	for i < len(s) {
@@ -307,7 +282,6 @@ func expandEnv(s string) string {
 					i = j + 1
 					continue
 				}
-				// no closing brace: write literally
 				out.WriteByte(c)
 				i++
 				continue
@@ -335,18 +309,15 @@ func isAlnumUnderscore(b byte) bool {
 	return false
 }
 
-// runJob: выполняет pipeline
 func runJob(job *Job) int {
 	if len(job.Cmds) == 0 {
 		return 0
 	}
 
-	// Builtins short-circuit: if single cmd and builtin, run in-process
 	if len(job.Cmds) == 1 && isBuiltin(job.Cmds[0].Args) {
 		return runBuiltin(job.Cmds[0])
 	}
 
-	// иначе создаём внешние команды и пайпим
 	n := len(job.Cmds)
 	cmds := make([]*exec.Cmd, n)
 	pipes := make([]*os.File, 2*(n-1))
@@ -360,15 +331,12 @@ func runJob(job *Job) int {
 		pipes[2*i+1] = w
 	}
 
-	// prepare exec.Cmds
 	for i, c := range job.Cmds {
 		if len(c.Args) == 0 {
 			continue
 		}
 		cmds[i] = exec.Command(c.Args[0], c.Args[1:]...)
-		// set process group so we can signal it
 		cmds[i].SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		// stdin
 		if c.In != "" {
 			f, err := os.Open(c.In)
 			if err != nil {
@@ -379,7 +347,6 @@ func runJob(job *Job) int {
 		} else if i > 0 {
 			cmds[i].Stdin = pipes[2*(i-1)]
 		}
-		// stdout
 		if c.Out != "" {
 			flag := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 			if c.Append {
@@ -396,11 +363,9 @@ func runJob(job *Job) int {
 		} else {
 			cmds[i].Stdout = os.Stdout
 		}
-		// stderr
 		cmds[i].Stderr = os.Stderr
 	}
 
-	// Start each command
 	currentCmdProcs = []*os.Process{}
 	for i, c := range cmds {
 		if c == nil {
@@ -408,7 +373,6 @@ func runJob(job *Job) int {
 		}
 		if err := c.Start(); err != nil {
 			fmt.Fprintln(os.Stderr, "start error:", err)
-			// close pipes
 			for _, p := range pipes {
 				if p != nil {
 					p.Close()
@@ -416,22 +380,17 @@ func runJob(job *Job) int {
 			}
 			return 1
 		}
-		// record process
 		currentCmdProcs = append(currentCmdProcs, c.Process)
-		// close writer ends in parent where appropriate
 		if i > 0 {
-			// close read end in parent? keep for next
 		}
 	}
 
-	// Close pipe fds in parent
 	for _, p := range pipes {
 		if p != nil {
 			p.Close()
 		}
 	}
 
-	// Wait for cmds
 	status := 0
 	for _, c := range cmds {
 		if c == nil {
@@ -448,16 +407,13 @@ func runJob(job *Job) int {
 				status = 1
 			}
 		} else {
-			// success
 			status = 0
 		}
 	}
-	// clear current procs
 	currentCmdProcs = []*os.Process{}
 	return status
 }
 
-// isBuiltin: проверяет имя команды
 func isBuiltin(args []string) bool {
 	if len(args) == 0 {
 		return false
@@ -516,7 +472,6 @@ func runBuiltin(cmd *Cmd) int {
 		}
 		return 0
 	case "ps":
-		// простая реализация через системную утилиту ps
 		c := exec.Command("ps", "-aux")
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
@@ -528,12 +483,3 @@ func runBuiltin(cmd *Cmd) int {
 	}
 	return 0
 }
-
-// Тесты: не включены — запускайте программу, вводите команды
-
-// Примечания / ограничения:
-// - Запись и чтение с файлов открываются с простыми флагами.
-// - Парсер простой и не покрывает все edge-cases (например вложенные кавычки + переменные внутри).
-// - Для корректной передачи Ctrl+C дочерним процессам используется Setpgid, и сигнал пересылается текущим процессам.
-// - Пайплайн не реализует оптимизацию для полностью встроенных команд в середине пайплайна.
-// - Условные операторы &&/|| применяются между блоками (job'ами) разделёнными этими операторами.
