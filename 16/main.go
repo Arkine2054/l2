@@ -7,7 +7,6 @@ import (
 	"github.com/temoto/robotstxt"
 	"golang.org/x/net/html"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -110,7 +109,7 @@ func (m *Mirror) fetchAndProcess(u *url.URL, curDepth int) error {
 
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "text/html") || maybeHTMLByURL(u.Path) {
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
